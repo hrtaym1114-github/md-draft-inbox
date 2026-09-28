@@ -1,79 +1,109 @@
 # md-draft-inbox
 
-判定の次は人の受信箱。エージェントや日次ジョブが生成した Markdown 下書きを、人が読んで承認する inbox に送る小さな CLI です。投稿・予約は行いません。
+判定の次は人の受信箱。エージェントや日次ジョブが作った Markdown 下書きを、**人が読んで承認する inbox にだけ置く**小さな CLI です。
 
-Send Markdown drafts to a human-approval inbox after your quality gate. Generated drafts need a place for people to review them. This CLI creates inbox drafts only: **never publish to X**, and never automatically approve or schedule anything. The receiving inbox is responsible for the human review workflow.
+Send Markdown drafts to a human-approval inbox after your quality gate.  
+**Never publish to X.** Never auto-approve or schedule. Inbox POST only.
+
+[![dry-run → inbox](docs/media/md-draft-inbox-strip.png)](docs/media/md-draft-inbox-howto.gif)
+
+- 🎞️ [GIF](docs/media/md-draft-inbox-howto.gif)
+- Release: [v0.1.0](https://github.com/hrtaym1114-github/md-draft-inbox/releases/tag/v0.1.0)
+
+## 使い方（4ステップ）
+
+1. **Install** — `pip install git+https://github.com/hrtaym1114-github/md-draft-inbox.git`
+2. **Dry-run** — `md-draft-inbox examples/pass.md --dry-run`（通信・キー不要）
+3. **Env（実送信時のみ）** — `MD_DRAFT_INBOX_URL` / `MD_DRAFT_INBOX_TOKEN`（下書き作成専用）
+4. **結果** — 全ファイル成功 **exit 0** / いずれか失敗 **exit 1**
+
+```sh
+md-draft-inbox examples/pass.md --dry-run
+# Draft: pass.md title='A draft for review' (65 chars, id=…)
+```
 
 ## Install / インストール
 
-Python 3.10+; no runtime dependencies. From the source checkout:
+Python ≥ 3.10。実行時依存なし（標準ライブラリのみ）。
 
 ```sh
+# 見知らぬ人向け（推奨）
+pip install git+https://github.com/hrtaym1114-github/md-draft-inbox.git
+
+# 開発（このリポ）
 python3 -m venv .venv
-.venv/bin/pip install -e .
+.venv/bin/pip install -e '.[dev]'
 .venv/bin/md-draft-inbox examples/pass.md --dry-run
+.venv/bin/pytest -q
 ```
 
-After installation, use `md-draft-inbox` from the active environment, or `python -m md_draft_inbox`.
+`python -m md_draft_inbox` でも同じです。
 
 ## Configuration / 環境変数
 
-| Variable | Live / 実送信 | Dry run |
+| Variable | Live / 実送信 | Dry-run |
 | --- | --- | --- |
-| `MD_DRAFT_INBOX_URL` | Required: your inbox draft-create endpoint | Unused |
-| `MD_DRAFT_INBOX_TOKEN` | Required: Bearer token for draft creation | Unused |
+| `MD_DRAFT_INBOX_URL` | 必須: inbox の draft-create URL | 未使用 |
+| `MD_DRAFT_INBOX_TOKEN` | 必須: Bearer（下書き作成専用） | 未使用 |
 
-URL やトークンは環境変数で指定します。設定ファイルは読みません。下書き作成用の権限を持つトークンを利用してください。
-Use a token scoped to draft creation. No configuration files are read.
+設定ファイルは読みません。URL・トークンは環境変数のみ。投稿・予約用の広い権限トークンは渡さないでください。
 
 ## Usage / 使い方
 
 ```sh
-# Parse only: no network or credentials required / 通信なし
+# 通信なし
 md-draft-inbox examples/pass.md --dry-run
 md-draft-inbox examples/pass.md --dry-run --json
 
-# Set your own endpoint and token / 自分の inbox を設定
-export MD_DRAFT_INBOX_URL='<your inbox draft-create URL>'
-export MD_DRAFT_INBOX_TOKEN='<your draft-create token>'
+# 実送信（自分の inbox）
+export MD_DRAFT_INBOX_URL='https://example.com/api/drafts'
+export MD_DRAFT_INBOX_TOKEN='…'   # draft-create only
 md-draft-inbox examples/pass.md
 
-# Multiple files and a custom section / 複数ファイル・本文見出し変更
+# 複数ファイル・本文見出し変更
 md-draft-inbox first.md second.md --section Draft --adapter studio
 ```
 
-The first `#` heading supplies the title; otherwise the filename stem is used. Titles are truncated to 100 characters. The body comes from `## 投稿文` (or the exact `--section` heading), ending at the next level-two heading outside a fence. An enclosing triple-backtick fence is unwrapped; a trailing `---` separator is removed. Missing sections, empty bodies, unclosed fences, and bodies over 20,000 characters fail that file.
+### 抽出ルール
 
-タイトルは `#` 見出し（無ければ拡張子を除くファイル名）、本文は `## 投稿文` から抽出します。`--section` で変更できます。コードフェンスと末尾の区切り線を除去し、本文が空・見出しなし・フェンス未閉鎖・20,000文字超の場合は失敗します。
+- **タイトル**: 先頭の `#` 見出し。無ければファイル名（拡張子なし）。100文字で切る
+- **本文**: 既定は `## 投稿文`（`--section` で変更）。次の h2（フェンス外）まで
+- 囲いの triple-backtick フェンスは外す。末尾の `---` は除去
+- 見出しなし・空本文・フェンス未閉鎖・本文 20,000 文字超 → そのファイルは失敗
 
-The sole adapter, `studio`, sends `{id, title, body, source}` as UTF-8 JSON via HTTP POST with Bearer authentication. `source` is the filename only. The stable ID is:
+### Adapter `studio`（唯一・既定）
+
+UTF-8 JSON を HTTP POST + Bearer で送ります。形は `{id, title, body, source}`。`source` はファイル名のみ。
+
+安定 ID:
 
 ```python
 uuid.uuid5(uuid.NAMESPACE_URL,
-           'md-draft-inbox:' + source + '\n' + title[:100] + '\n' + body)
+           'md-draft-inbox:' + filename + '\n' + title[:100] + '\n' + body)
 ```
 
-Moving a file without renaming or changing its extracted content preserves its ID. Retrying preserves the ID; duplicate handling depends on the inbox. Files are never modified. The response must be valid JSON; HTTP errors fail the file. No particular receipt fields are required.
+ファイルを動かしても名前と抽出内容が同じなら ID は維持。原稿ファイルは変更しません。重複扱いは inbox 側。HTTP エラー／不正 JSON はそのファイル失敗。特定のレスポンスフィールドは必須にしません。
 
-原稿は変更しません。同じファイル名と抽出内容で再実行すると同じ ID になります。重複処理は inbox 側の実装によります。
-
-`--json` writes one object per file to stdout with `ok`, `path`, and `dry_run`; successes add `id`, `title`, and `chars`, while failures add `error`. Errors also go to stderr. Processing continues after a failed file, including missing live configuration.
+`--json` はファイルごとに `ok` / `path` / `dry_run`（成功時は `id` / `title` / `chars`、失敗時は `error`）。エラーは stderr にも出ます。失敗後も次のファイルを処理します。
 
 ## Exit codes / 終了コード
 
 | Code | Meaning / 意味 |
 | --- | --- |
-| 0 | All files succeeded / 全ファイル成功 |
-| 1 | At least one file failed / いずれか失敗 |
-| 2 | Invalid CLI arguments / 引数エラー |
+| 0 | 全ファイル成功 |
+| 1 | いずれか失敗 |
+| 2 | 引数エラー |
 
-## Development / 開発
+## Non-goals / やらないこと
 
-```sh
-.venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest -q
-```
+- X / Typefully などへの **投稿・予約 API**
+- 自動公開・スケジュール
+- LLM 添削・生成
+- Vault パス構造（`@Doing` 等）の強制
 
-Related quality gate: [x-jev-gate](https://github.com/hrtaym1114-github/x-jev-gate).
+## Related
+
+上流の品質ゲート: [x-jev-gate](https://github.com/hrtaym1114-github/x-jev-gate)  
+収集ゲート: [news-collect-validate](https://github.com/hrtaym1114-github/news-collect-validate)
 
 MIT © 2026 hrtaym1114
