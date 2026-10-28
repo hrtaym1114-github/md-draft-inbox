@@ -1,3 +1,4 @@
+English: [README.en.md](README.en.md)
 # md-draft-inbox
 
 判定の次は人の受信箱。エージェントや日次ジョブが作った Markdown 下書きを、**人が読んで承認する inbox にだけ置く**小さな CLI です。
@@ -99,7 +100,7 @@ uuid.uuid5(uuid.NAMESPACE_URL,
 - X / Typefully などへの **投稿・予約 API**
 - 自動公開・スケジュール
 - LLM 添削・生成
-- Vault パス構造（`@Doing` 等）の強制
+- 決まったフォルダ構成の強制
 
 ## Related
 
